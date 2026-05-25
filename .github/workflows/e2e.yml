@@ -26,12 +26,25 @@ jobs:
       - name: Bring up the cluster
         env:
           KAFKA_UP_ENGINE: docker
+          NO_COLOR: "1"
         run: |
+          set -o pipefail
           if [ "${{ matrix.mode }}" = "cluster" ]; then
-            ./kafka-up --engine docker --brokers 3
+            ./kafka-up --engine docker --brokers 3 2>&1 | tee /tmp/kafka-up.out
           else
-            ./kafka-up --engine docker
+            ./kafka-up --engine docker 2>&1 | tee /tmp/kafka-up.out
           fi
+
+      - name: Echo kafka-up output to summary
+        if: always()
+        run: |
+          {
+            echo "### kafka-up output (${{ matrix.mode }} mode)"
+            echo
+            echo '```text'
+            cat /tmp/kafka-up.out 2>/dev/null || echo "(no output captured)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: List topics
         run: |
@@ -79,9 +92,29 @@ jobs:
       - name: Dump logs on failure
         if: failure()
         run: |
-          for c in $(docker ps --filter name=kafka-up- --format '{{.Names}}'); do
+          # Always emit to the job summary so the failure is readable
+          # without log-API auth on a public repo.
+          {
+            echo "### Container state (${{ matrix.mode }} mode)"
+            echo
+            echo '```'
+            docker ps -a --filter name=kafka-up- --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' || true
+            echo '```'
+            for c in $(docker ps -a --filter name=kafka-up- --format '{{.Names}}'); do
+              echo
+              echo "<details><summary><code>$c</code> last 200 log lines</summary>"
+              echo
+              echo '```'
+              docker logs --tail 200 "$c" 2>&1 || true
+              echo '```'
+              echo
+              echo "</details>"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+          # Also dump to stdout so the workflow logs have it too.
+          for c in $(docker ps -a --filter name=kafka-up- --format '{{.Names}}'); do
             echo "::group::$c"
-            docker logs --tail 200 "$c" || true
+            docker logs --tail 200 "$c" 2>&1 || true
             echo "::endgroup::"
           done
 
