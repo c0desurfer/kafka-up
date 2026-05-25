@@ -1,65 +1,56 @@
+<div align="center">
+
 # kafka-up
 
-A local Apache Kafka environment for developers. One command, one
-cluster, zero ceremony.
+**One command, one cluster, zero ceremony.**
+
+A local Apache Kafka environment for developers, ready in around ten seconds.
+
+[![CI](https://github.com/c0desurfer/kafka-up/actions/workflows/e2e.yml/badge.svg)](https://github.com/c0desurfer/kafka-up/actions/workflows/e2e.yml)
+[![Lint](https://github.com/c0desurfer/kafka-up/actions/workflows/lint.yml/badge.svg)](https://github.com/c0desurfer/kafka-up/actions/workflows/lint.yml)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](./LICENSE)
+[![Renovate](https://img.shields.io/badge/Renovate-enabled-1A1F6C?logo=renovatebot&logoColor=white)](./renovate.json)
+
+[![Apache Kafka](https://img.shields.io/badge/Apache%20Kafka-4.3.0-231F20?logo=apachekafka&logoColor=white)](https://kafka.apache.org/)
+[![Schema Registry](https://img.shields.io/badge/Schema%20Registry-7.9.7-1F2F46)](https://docs.confluent.io/platform/current/schema-registry/index.html)
+[![Kafka Connect](https://img.shields.io/badge/Kafka%20Connect-7.9.7-1F2F46)](https://docs.confluent.io/platform/current/connect/index.html)
+[![Kafbat UI](https://img.shields.io/badge/Kafbat%20UI-v1.5.0-3D8BD3)](https://github.com/kafbat/kafka-ui)
+
+[![KRaft](https://img.shields.io/badge/KRaft-no%20ZooKeeper-F37726)](https://kafka.apache.org/documentation/#kraft)
+[![Podman](https://img.shields.io/badge/Podman-4%2B-892CA0?logo=podman&logoColor=white)](https://podman.io/)
+[![Docker](https://img.shields.io/badge/Docker-24%2B-2496ED?logo=docker&logoColor=white)](https://www.docker.com/)
+[![Bash](https://img.shields.io/badge/Bash-5%2B-4EAA25?logo=gnubash&logoColor=white)](https://www.gnu.org/software/bash/)
+[![Shellcheck](https://img.shields.io/badge/shellcheck-clean-brightgreen)](https://www.shellcheck.net/)
+
+</div>
+
+---
 
 ```
 $ ./kafka-up
- _              __  _
-| |____ _ / _| |_____ _   _ _ __
-| / / _` | |_| |/ / _` |__| | | | '_ \
-|   < (_| |  _|   < (_| |__| |_| | |_) |
-|_|\_\__,_|_| |_|\_\__,_|   \__,_| .__/
-                                 |_|
+██╗  ██╗ █████╗ ███████╗██╗  ██╗ █████╗       ██╗   ██╗██████╗
+██║ ██╔╝██╔══██╗██╔════╝██║ ██╔╝██╔══██╗      ██║   ██║██╔══██╗
+█████╔╝ ███████║█████╗  █████╔╝ ███████║█████╗██║   ██║██████╔╝
+██╔═██╗ ██╔══██║██╔══╝  ██╔═██╗ ██╔══██║╚════╝██║   ██║██╔═══╝
+██║  ██╗██║  ██║██║     ██║  ██╗██║  ██║      ╚██████╔╝██║
+╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚═╝
 one command, one cluster, zero ceremony
 
-plan
-  engine             podman
-  brokers            1
-  schema registry    on  (port 8081)
-  kafka connect      on  (port 8083)
-  web ui             on  (port 8080)
-  seed topics        yes
-
-preflight
-  ok  podman is reachable
-  ok  topology configured (RF=1, min.isr=1)
-
-starting containers
-  > pulling images and creating containers
-  ok  containers up
-
-waiting for health
-  > kafka0
-  ok  kafka0 healthy
-  > schema-registry
-  ok  schema-registry healthy
-  > connect
-  ok  connect healthy
-  > ui
-  ok  ui healthy
-
-seeding
-  > creating example topics
-  ok  topics ready
+  ...
 
 summary
-+--------------------------------------------------------------+
-| kafka-up is ready                                            |
-+--------------------------------------------------------------+
-| bootstrap (host)     localhost:9092                          |
-| schema registry      http://localhost:8081                   |
-| kafka connect        http://localhost:8083                   |
-| web ui               http://localhost:8080                   |
-|                                                              |
-| brokers              1                                       |
-| replication factor   1                                       |
-| min insync replicas  1                                       |
-|                                                              |
-| stop the cluster     ./kafka-down                            |
-| wipe everything      ./kafka-reset                           |
-| see what's running   ./kafka-status                          |
-+--------------------------------------------------------------+
++----------------------------------------------------------------+
+| kafka-up is ready                                              |
++----------------------------------------------------------------+
+| bootstrap (host)     localhost:9092                            |
+| schema registry      http://localhost:8081                     |
+| kafka connect        http://localhost:8083                     |
+| web ui               http://localhost:8080                     |
+|                                                                |
+| brokers              1                                         |
+| replication factor   1                                         |
+| min insync replicas  1                                         |
++----------------------------------------------------------------+
 
 ready in 11s
 ```
@@ -114,9 +105,9 @@ Design choices worth knowing:
   Compose v2.
 - Bash, `curl`. That is the whole list.
 
-On macOS or Windows, run `podman machine start` once before the first
-`./kafka-up`. The script tells you so if it detects the machine is
-stopped.
+On macOS or Windows, `./kafka-up` starts the podman machine for you if
+one exists but is stopped. The very first time you use podman on a new
+machine, run `podman machine init` once to create the VM.
 
 ## Usage
 
@@ -252,9 +243,10 @@ and run `./kafka-logs kafka0`. If the broker is logging
 machine has a stale image cached. `podman image prune -a` then retry.
 
 **On macOS, podman says `Cannot connect to Podman`.** Your VM is not
-running. `podman machine start`. The script prints this hint when it
-detects the situation, but it shows up unexpectedly when the VM
-crashes mid-session.
+running. `./kafka-up` auto-starts it on bring-up, so the failure mode
+you usually see is the VM crashing mid-session. `podman machine
+restart` resolves it. If you have never run podman before, do
+`podman machine init` once to create the VM.
 
 ## How it is wired
 

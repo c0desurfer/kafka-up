@@ -29,16 +29,19 @@ else
   C_GRAY=""
 fi
 
-# Banner printed by kafka-up. Pure ASCII, fits in 80 columns.
+# Banner printed by kafka-up. Uses Unicode box-drawing characters,
+# which render correctly in every modern terminal and in GitHub's
+# monospace code blocks. 63 columns wide, fits in any reasonable
+# terminal.
 ui_banner() {
   printf '%s' "${C_CYAN}"
   cat <<'BANNER'
- _              __  _
-| |____ _ / _| |_____ _   _ _ __
-| / / _` | |_| |/ / _` |__| | | | '_ \
-|   < (_| |  _|   < (_| |__| |_| | |_) |
-|_|\_\__,_|_| |_|\_\__,_|   \__,_| .__/
-                                 |_|
+██╗  ██╗ █████╗ ███████╗██╗  ██╗ █████╗       ██╗   ██╗██████╗
+██║ ██╔╝██╔══██╗██╔════╝██║ ██╔╝██╔══██╗      ██║   ██║██╔══██╗
+█████╔╝ ███████║█████╗  █████╔╝ ███████║█████╗██║   ██║██████╔╝
+██╔═██╗ ██╔══██║██╔══╝  ██╔═██╗ ██╔══██║╚════╝██║   ██║██╔═══╝
+██║  ██╗██║  ██║██║     ██║  ██╗██║  ██║      ╚██████╔╝██║
+╚═╝  ╚═╝╚═╝  ╚═╝╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝       ╚═════╝ ╚═╝
 BANNER
   printf '%s' "${C_RESET}"
 }

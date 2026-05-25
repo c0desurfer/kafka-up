@@ -26,28 +26,68 @@ in_container() {
 }
 
 # Container engine sanity check. Returns 0 if usable, 1 with a message
-# otherwise.
+# otherwise. On macOS or Windows, automatically starts the podman
+# machine if one exists and is not running. Linux podman has no VM,
+# so the start step is skipped silently.
 require_engine() {
   if ! command -v "$KAFKA_UP_ENGINE" >/dev/null 2>&1; then
     ui_err "container engine '$KAFKA_UP_ENGINE' not found in PATH"
     ui_hint "install podman (https://podman.io) or set KAFKA_UP_ENGINE=docker"
     return 1
   fi
+
   if [ "$KAFKA_UP_ENGINE" = "podman" ]; then
-    if ! podman info >/dev/null 2>&1; then
-      if podman machine list --format '{{.Running}}' 2>/dev/null | grep -q true; then
-        ui_err "podman cannot reach its VM even though one is listed as running"
-      else
-        ui_err "podman is not reachable"
-        ui_hint "on macOS or Windows, run: podman machine start"
+    if podman info >/dev/null 2>&1; then
+      return 0
+    fi
+    # podman is installed but not reachable. On macOS/Windows that
+    # usually means the VM is stopped. Try to bring it up.
+    if podman machine list --format '{{.Name}}' 2>/dev/null | grep -q .; then
+      if podman machine list --format '{{.Running}}' 2>/dev/null | grep -qi true; then
+        ui_err "podman machine is running but podman cannot reach it"
+        ui_hint "try: podman machine stop && podman machine start"
+        return 1
       fi
+      ui_step "podman machine is stopped, starting it (10-20s)"
+      if ! podman machine start >/dev/null 2>&1; then
+        ui_err "failed to start podman machine"
+        ui_hint "run manually and retry: podman machine start"
+        return 1
+      fi
+      ui_ok "podman machine started"
+      # Brief settle window: podman info can race the socket coming up.
+      local i=0
+      while (( i < 10 )); do
+        if podman info >/dev/null 2>&1; then
+          return 0
+        fi
+        sleep 1
+        i=$((i+1))
+      done
+      ui_err "podman machine started but podman is still not reachable"
+      ui_hint "check: podman machine list"
       return 1
     fi
-  else
-    if ! "$KAFKA_UP_ENGINE" info >/dev/null 2>&1; then
-      ui_err "$KAFKA_UP_ENGINE is installed but not reachable"
-      return 1
+    # No machine exists. On Linux this is normal, podman runs
+    # daemonless, so check info one more time and report whatever
+    # the real error is.
+    if podman info >/dev/null 2>&1; then
+      return 0
     fi
+    if [ "$(uname -s)" = "Darwin" ] || uname -s | grep -qiE 'mingw|msys|cygwin'; then
+      ui_err "no podman machine found"
+      ui_hint "create one with: podman machine init && podman machine start"
+    else
+      ui_err "podman is installed but not reachable"
+      ui_hint "check the podman daemon or socket configuration"
+    fi
+    return 1
+  fi
+
+  if ! "$KAFKA_UP_ENGINE" info >/dev/null 2>&1; then
+    ui_err "$KAFKA_UP_ENGINE is installed but not reachable"
+    ui_hint "on macOS, start Docker Desktop; on Linux, check the docker daemon"
+    return 1
   fi
   return 0
 }
