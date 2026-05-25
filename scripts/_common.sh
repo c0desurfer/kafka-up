@@ -144,16 +144,29 @@ detect_topology() {
   esac
 }
 
-# Block until a service reports healthy (compose healthcheck). Polls
-# `$ENGINE inspect` for the State.Health.Status field. Returns 0 on
-# healthy, 1 on timeout. Quiet, caller draws the UI.
+# Block until a service is ready. For containers with a compose
+# healthcheck, that means State.Health.Status == "healthy". For
+# containers without one, the best we can do is wait for the container
+# to be running (State.Status == "running"). Returns 0 on ready,
+# 1 on timeout. Quiet, caller draws the UI.
 wait_healthy() {
   local service="$1" max="${2:-90}" i=0 status
   local container="kafka-up-${service}"
+  local has_check
+  has_check=$("$KAFKA_UP_ENGINE" inspect \
+    --format '{{if .State.Health}}yes{{else}}no{{end}}' \
+    "$container" 2>/dev/null || echo no)
   while (( i < max )); do
-    status=$("$KAFKA_UP_ENGINE" inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || true)
-    if [ "$status" = "healthy" ]; then
-      return 0
+    if [ "$has_check" = "yes" ]; then
+      status=$("$KAFKA_UP_ENGINE" inspect --format '{{.State.Health.Status}}' "$container" 2>/dev/null || true)
+      if [ "$status" = "healthy" ]; then
+        return 0
+      fi
+    else
+      status=$("$KAFKA_UP_ENGINE" inspect --format '{{.State.Status}}' "$container" 2>/dev/null || true)
+      if [ "$status" = "running" ]; then
+        return 0
+      fi
     fi
     sleep 1
     i=$((i+1))
