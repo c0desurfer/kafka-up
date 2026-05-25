@@ -1,0 +1,17 @@
+# OS noise
+.DS_Store
+Thumbs.db
+
+# Editor noise
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Runtime artefacts from manual experimentation. The compose volumes
+# are named volumes managed by podman/docker, not on-disk paths, so
+# they do not need ignoring. Anything that lands here is a developer
+# scratchpad.
+/tmp/
+/.env
+/.env.local

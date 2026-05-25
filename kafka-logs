@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# kafka-logs: tail logs for a kafka-up service. Default is kafka0.
+#
+# Usage:
+#   ./kafka-logs                    follow kafka0
+#   ./kafka-logs schema-registry    follow schema-registry
+#   ./kafka-logs --no-follow ui     print and exit (last 200 lines)
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=scripts/_ui.sh
+. "$HERE/scripts/_ui.sh"
+# shellcheck source=scripts/_common.sh
+. "$HERE/scripts/_common.sh"
+
+FOLLOW=1
+SERVICE="kafka0"
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --no-follow|-n) FOLLOW=0; shift ;;
+    -h|--help)
+      sed -n '2,9p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *) SERVICE="$1"; shift ;;
+  esac
+done
+
+require_engine || exit 1
+
+if ! is_running "$SERVICE"; then
+  ui_err "service '$SERVICE' is not running"
+  ui_hint "running: $($KAFKA_UP_ENGINE ps --filter name=kafka-up- --format '{{.Names}}' | sed 's/^kafka-up-//' | tr '\n' ' ')"
+  exit 1
+fi
+
+if [ "$FOLLOW" = "1" ]; then
+  exec "$KAFKA_UP_ENGINE" logs -f --tail 200 "kafka-up-${SERVICE}"
+else
+  exec "$KAFKA_UP_ENGINE" logs --tail 200 "kafka-up-${SERVICE}"
+fi

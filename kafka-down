@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# kafka-down: stop all kafka-up containers. Preserves volumes so the
+# next ./kafka-up resumes the same state. Use ./kafka-reset for a wipe.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=scripts/_ui.sh
+. "$HERE/scripts/_ui.sh"
+# shellcheck source=scripts/_common.sh
+. "$HERE/scripts/_common.sh"
+
+ui_banner
+ui_section "stopping kafka-up"
+
+require_engine || exit 1
+
+# Pass all known profiles so containers started under any of them get
+# stopped cleanly.
+if compose --profile cluster --profile connect --profile ui stop >/dev/null 2>&1; then
+  ui_ok "containers stopped"
+else
+  ui_warn "compose stop returned non-zero (nothing running?)"
+fi
+
+ui_section "summary"
+ui_kv "volumes" "preserved (./kafka-up resumes the same state)"
+ui_kv "wipe"    "./kafka-reset"

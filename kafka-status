@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# kafka-status: read-only snapshot of the kafka-up environment. Lists
+# running containers, port mappings, topics, and Schema Registry
+# subjects. Touches nothing.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=scripts/_ui.sh
+. "$HERE/scripts/_ui.sh"
+# shellcheck source=scripts/_common.sh
+. "$HERE/scripts/_common.sh"
+
+ui_banner
+require_engine || exit 1
+
+ui_section "containers"
+mapfile -t rows < <(
+  "$KAFKA_UP_ENGINE" ps \
+    --filter "name=kafka-up-" \
+    --format '{{.Names}}|{{.Status}}|{{.Ports}}' \
+    2>/dev/null
+)
+if [ "${#rows[@]}" -eq 0 ]; then
+  ui_warn "no kafka-up containers are running"
+  ui_hint "start them with ./kafka-up"
+  exit 0
+fi
+for row in "${rows[@]}"; do
+  IFS='|' read -r name status ports <<<"$row"
+  short_status="${status%% *}"
+  case "$short_status" in
+    Up|running) marker="${C_GREEN}ok${C_RESET}" ;;
+    *)          marker="${C_YELLOW}? ${C_RESET}" ;;
+  esac
+  printf '  %s  %-28s %s\n' "$marker" "$name" "${C_DIM}${ports}${C_RESET}"
+done
+
+# Topics + brokers. Use kafka0 (always present) as the admin endpoint.
+if is_running kafka0; then
+  ui_section "topics"
+  if topic_list=$(in_container kafka0 /opt/kafka/bin/kafka-topics.sh \
+      --bootstrap-server localhost:9092 --list 2>/dev/null); then
+    if [ -z "$topic_list" ]; then
+      ui_hint "no topics yet"
+    else
+      while IFS= read -r t; do
+        printf '  %s.%s %s\n' "${C_DIM}" "${C_RESET}" "$t"
+      done <<<"$topic_list"
+    fi
+  else
+    ui_warn "could not list topics (broker still starting?)"
+  fi
+
+  ui_section "brokers"
+  if cluster=$(in_container kafka0 /opt/kafka/bin/kafka-broker-api-versions.sh \
+      --bootstrap-server localhost:9092 2>/dev/null | grep -c 'id:'); then
+    ui_kv "alive" "$cluster"
+  fi
+fi
+
+if is_running schema-registry; then
+  ui_section "schema registry"
+  if subjects=$(curl -fsS http://localhost:8081/subjects 2>/dev/null); then
+    count=$(printf '%s' "$subjects" | tr -d '[] "' | awk -F, 'NF{print NF}')
+    ui_kv "subjects" "${count:-0}"
+  else
+    ui_warn "schema registry not responding on :8081"
+  fi
+fi
+
+if is_running connect; then
+  ui_section "kafka connect"
+  if connectors=$(curl -fsS http://localhost:8083/connectors 2>/dev/null); then
+    count=$(printf '%s' "$connectors" | tr -d '[]" ' | awk -F, 'NF{print NF}')
+    ui_kv "connectors" "${count:-0}"
+  else
+    ui_warn "connect not responding on :8083"
+  fi
+fi
+
+if is_running ui; then
+  ui_section "web ui"
+  ui_kv "open" "http://localhost:8080"
+fi

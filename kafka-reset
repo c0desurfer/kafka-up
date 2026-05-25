@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# kafka-reset: tear down containers AND wipe volumes. Asks for typed
+# confirmation. After this, the cluster ID resets and topics are gone.
+#
+# Pass --yes to skip the confirmation (useful for CI and one-liners).
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=scripts/_ui.sh
+. "$HERE/scripts/_ui.sh"
+# shellcheck source=scripts/_common.sh
+. "$HERE/scripts/_common.sh"
+
+ASSUME_YES=0
+if [ "${1:-}" = "--yes" ] || [ "${1:-}" = "-y" ]; then
+  ASSUME_YES=1
+fi
+
+ui_banner
+ui_section "kafka-reset"
+
+require_engine || exit 1
+
+ui_warn "this deletes all kafka-up data: topics, messages, schemas, connectors"
+if [ "$ASSUME_YES" = "0" ]; then
+  printf '  type %sreset%s to confirm: ' "${C_BOLD}" "${C_RESET}"
+  read -r answer
+  if [ "$answer" != "reset" ]; then
+    ui_err "aborted (got '$answer', expected 'reset')"
+    exit 1
+  fi
+fi
+
+ui_section "tearing down"
+ui_step "removing containers and volumes"
+if compose --profile cluster --profile connect --profile ui down -v >/dev/null 2>&1; then
+  ui_ok "down -v complete"
+else
+  ui_warn "compose down -v returned non-zero (nothing to remove?)"
+fi
+
+# Belt-and-braces: remove any orphan named volumes that survived a
+# previous compose run (older project names, half-aborted resets).
+for vol in kafka-up-kafka0-data kafka-up-kafka1-data kafka-up-kafka2-data; do
+  if "$KAFKA_UP_ENGINE" volume inspect "$vol" >/dev/null 2>&1; then
+    "$KAFKA_UP_ENGINE" volume rm -f "$vol" >/dev/null 2>&1 || true
+    ui_ok "removed volume $vol"
+  fi
+done
+
+ui_section "summary"
+ui_kv "next" "./kafka-up to start a fresh cluster"

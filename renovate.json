@@ -1,0 +1,61 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard",
+    ":maintainLockFilesWeekly"
+  ],
+  "timezone": "Europe/Zurich",
+  "schedule": ["before 06:00 on monday"],
+  "labels": ["dependencies"],
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 8,
+  "rangeStrategy": "pin",
+  "docker-compose": {
+    "fileMatch": ["(^|/)compose\\.ya?ml$"]
+  },
+  "packageRules": [
+    {
+      "description": "Group the Confluent Platform sidecars so SR and Connect bump in lockstep.",
+      "matchManagers": ["docker-compose"],
+      "matchPackageNames": [
+        "confluentinc/cp-schema-registry",
+        "confluentinc/cp-kafka-connect"
+      ],
+      "groupName": "confluent platform",
+      "commitMessageTopic": "Confluent Platform"
+    },
+    {
+      "description": "Apache Kafka is the headline upgrade, keep it on its own PR.",
+      "matchManagers": ["docker-compose"],
+      "matchPackageNames": ["apache/kafka"],
+      "groupName": "apache kafka",
+      "commitMessageTopic": "Apache Kafka",
+      "minimumReleaseAge": "3 days"
+    },
+    {
+      "description": "Kafbat UI on its own PR. Releases often.",
+      "matchManagers": ["docker-compose"],
+      "matchPackageNames": ["ghcr.io/kafbat/kafka-ui"],
+      "groupName": "kafbat ui"
+    },
+    {
+      "description": "GitHub Actions: pin to SHAs but show the tag in the PR.",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "groupName": "github actions"
+    },
+    {
+      "description": "Automerge patch bumps of all images once CI is green.",
+      "matchManagers": ["docker-compose"],
+      "matchUpdateTypes": ["patch", "digest"],
+      "automerge": true,
+      "platformAutomerge": true
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["security"],
+    "automerge": false
+  }
+}

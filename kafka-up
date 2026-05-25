@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# kafka-up: bring up a local Kafka environment in seconds.
+#
+# Usage:
+#   ./kafka-up                   one broker, Schema Registry, Connect, UI
+#   ./kafka-up --brokers 3       three-broker cluster
+#   ./kafka-up --no-connect      skip Kafka Connect
+#   ./kafka-up --no-ui           skip the Kafbat web UI
+#   ./kafka-up --no-seed         do not create the example topics
+#   ./kafka-up --engine docker   use docker compose instead of podman
+#
+# Anything not in the option list is rejected. Output is designed to be
+# read top-to-bottom: first the plan, then each phase, then a summary
+# box you can copy into a terminal.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+# shellcheck source=scripts/_ui.sh
+. "$HERE/scripts/_ui.sh"
+# shellcheck source=scripts/_common.sh
+. "$HERE/scripts/_common.sh"
+
+BROKERS=1
+WITH_CONNECT=1
+WITH_UI=1
+WITH_SEED=1
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --brokers)    BROKERS="${2:-}"; shift 2 ;;
+    --brokers=*)  BROKERS="${1#*=}"; shift ;;
+    --no-connect) WITH_CONNECT=0; shift ;;
+    --no-ui)      WITH_UI=0; shift ;;
+    --no-seed)    WITH_SEED=0; shift ;;
+    --engine)     KAFKA_UP_ENGINE="${2:-}"; export KAFKA_UP_ENGINE; shift 2 ;;
+    --engine=*)   KAFKA_UP_ENGINE="${1#*=}"; export KAFKA_UP_ENGINE; shift ;;
+    -h|--help)    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)            ui_err "unknown argument: $1"; exit 64 ;;
+  esac
+done
+
+START_TS=$(date +%s)
+ui_banner
+printf '%sone command, one cluster, zero ceremony%s\n' "${C_DIM}" "${C_RESET}"
+
+ui_section "plan"
+ui_kv "engine"          "$KAFKA_UP_ENGINE"
+ui_kv "brokers"         "$BROKERS"
+ui_kv "schema registry" "on  (port 8081)"
+ui_kv "kafka connect"   "$( ((WITH_CONNECT)) && echo 'on  (port 8083)' || echo 'off' )"
+ui_kv "web ui"          "$( ((WITH_UI))      && echo 'on  (port 8080)' || echo 'off' )"
+ui_kv "seed topics"     "$( ((WITH_SEED))    && echo 'yes' || echo 'no' )"
+
+ui_section "preflight"
+require_engine || exit 1
+ui_ok "$KAFKA_UP_ENGINE is reachable"
+
+configure_topology "$BROKERS"
+ui_ok "topology configured (RF=${KAFKA_UP_RF}, min.isr=${KAFKA_UP_MIN_ISR})"
+
+# Compose-up service list. We start brokers + SR always, and the
+# optional services on demand.
+services=(kafka0)
+if [ "$BROKERS" = "3" ]; then services+=(kafka1 kafka2); fi
+services+=(schema-registry)
+if [ "$WITH_CONNECT" = "1" ]; then services+=(connect); fi
+if [ "$WITH_UI" = "1" ];      then services+=(ui); fi
+
+ui_section "starting containers"
+ui_step "pulling images and creating containers"
+if ! compose "${KAFKA_UP_PROFILES[@]}" up -d --remove-orphans "${services[@]}" >/tmp/kafka-up-compose.log 2>&1; then
+  ui_err "compose up failed"
+  ui_hint "see /tmp/kafka-up-compose.log"
+  exit 1
+fi
+ui_ok "containers up"
+
+ui_section "waiting for health"
+for svc in "${services[@]}"; do
+  ui_step "$svc"
+  if wait_healthy "$svc" 90; then
+    ui_ok "$svc healthy"
+  else
+    ui_err "$svc did not become healthy in 90s"
+    ui_hint "try: ./kafka-logs $svc"
+    exit 1
+  fi
+done
+
+if [ "$WITH_SEED" = "1" ]; then
+  ui_section "seeding"
+  ui_step "creating example topics"
+  if "$HERE/scripts/seed-topics.sh" >/tmp/kafka-up-seed.log 2>&1; then
+    ui_ok "topics ready"
+  else
+    ui_warn "seed-topics.sh failed (cluster is up regardless)"
+    ui_hint "see /tmp/kafka-up-seed.log"
+  fi
+fi
+
+ui_section "summary"
+ui_box "kafka-up is ready"                                                  \
+  "bootstrap (host)     ${KAFKA_UP_BOOTSTRAP_HOST}"                          \
+  "schema registry      http://localhost:8081"                              \
+  "$( ((WITH_CONNECT)) && echo 'kafka connect        http://localhost:8083' || echo 'kafka connect        disabled' )" \
+  "$( ((WITH_UI))      && echo 'web ui               http://localhost:8080' || echo 'web ui               disabled' )" \
+  ""                                                                        \
+  "brokers              ${BROKERS}"                                          \
+  "replication factor   ${KAFKA_UP_RF}"                                      \
+  "min insync replicas  ${KAFKA_UP_MIN_ISR}"                                \
+  ""                                                                        \
+  "stop the cluster     ./kafka-down"                                       \
+  "wipe everything      ./kafka-reset"                                      \
+  "see what's running   ./kafka-status"
+
+printf '\n%sready in %s%s\n' "${C_DIM}" "$(ui_elapsed "$START_TS")" "${C_RESET}"

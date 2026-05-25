@@ -1,0 +1,90 @@
+name: e2e
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # Weekly run catches breakage from upstream images even when nothing
+    # in the repo has changed.
+    - cron: "17 4 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  bring-up:
+    name: ${{ matrix.mode }} mode
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [single, cluster]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bring up the cluster
+        env:
+          KAFKA_UP_ENGINE: docker
+        run: |
+          if [ "${{ matrix.mode }}" = "cluster" ]; then
+            ./kafka-up --engine docker --brokers 3
+          else
+            ./kafka-up --engine docker
+          fi
+
+      - name: List topics
+        run: |
+          docker exec kafka-up-kafka0 \
+            /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server localhost:9092 --list
+
+      - name: Produce and consume a test message
+        run: |
+          set -euo pipefail
+          docker exec kafka-up-kafka0 \
+            /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server localhost:9092 \
+            --create --if-not-exists \
+            --topic ci.smoke --partitions 3 --replication-factor 1
+          msg='{"ci":"hello","ts":"'"$(date -Iseconds)"'"}'
+          echo "$msg" | docker exec -i kafka-up-kafka0 \
+            /opt/kafka/bin/kafka-console-producer.sh \
+            --bootstrap-server localhost:9092 --topic ci.smoke
+          got=$(docker exec kafka-up-kafka0 \
+            /opt/kafka/bin/kafka-console-consumer.sh \
+            --bootstrap-server localhost:9092 --topic ci.smoke \
+            --from-beginning --max-messages 1 --timeout-ms 15000)
+          echo "got: $got"
+          test "$got" = "$msg"
+
+      - name: Schema Registry round-trip
+        run: |
+          set -euo pipefail
+          curl -fsS http://localhost:8081/subjects
+          curl -fsS -X POST -H 'Content-Type: application/json' \
+            --data '{"schema":"{\"type\":\"record\",\"name\":\"Hello\",\"fields\":[{\"name\":\"id\",\"type\":\"string\"}]}"}' \
+            http://localhost:8081/subjects/ci-smoke-value/versions
+          curl -fsS http://localhost:8081/subjects/ci-smoke-value/versions/latest
+
+      - name: Connect health
+        run: |
+          curl -fsS http://localhost:8083/ | tee /tmp/connect.json
+          # Empty list is fine, we just verify the API answers.
+          curl -fsS http://localhost:8083/connectors
+
+      - name: kafka-status snapshot
+        run: ./kafka-status
+
+      - name: Dump logs on failure
+        if: failure()
+        run: |
+          for c in $(docker ps --filter name=kafka-up- --format '{{.Names}}'); do
+            echo "::group::$c"
+            docker logs --tail 200 "$c" || true
+            echo "::endgroup::"
+          done
+
+      - name: Tear down
+        if: always()
+        run: ./kafka-reset --yes || true
