@@ -25,8 +25,8 @@ x-broker-common: &broker-common
       - "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 >/dev/null 2>&1"
     interval: 3s
     timeout: 5s
-    retries: 20
-    start_period: 5s
+    retries: 40
+    start_period: 15s
 
 x-broker-env: &broker-env
   KAFKA_PROCESS_ROLES: broker,controller

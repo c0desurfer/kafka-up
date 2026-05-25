@@ -72,9 +72,12 @@ if [ "$WITH_UI" = "1" ];      then sidecars+=(ui); fi
 
 ui_section "starting brokers"
 ui_step "pulling images and creating containers"
-if ! compose "${KAFKA_UP_PROFILES[@]}" up -d --remove-orphans "${brokers[@]}" >/tmp/kafka-up-compose.log 2>&1; then
+if ! compose "${KAFKA_UP_PROFILES[@]}" up -d --remove-orphans "${brokers[@]}" 2>/tmp/kafka-up-compose.err >/tmp/kafka-up-compose.out; then
   ui_err "compose up (brokers) failed"
-  ui_hint "see /tmp/kafka-up-compose.log"
+  printf '\n--- compose stderr ---\n' >&2
+  cat /tmp/kafka-up-compose.err >&2
+  printf '\n--- compose stdout ---\n' >&2
+  cat /tmp/kafka-up-compose.out >&2
   exit 1
 fi
 for svc in "${brokers[@]}"; do
@@ -89,9 +92,12 @@ for svc in "${brokers[@]}"; do
 done
 
 ui_section "starting sidecars"
-if ! compose "${KAFKA_UP_PROFILES[@]}" up -d "${sidecars[@]}" >>/tmp/kafka-up-compose.log 2>&1; then
+if ! compose "${KAFKA_UP_PROFILES[@]}" up -d "${sidecars[@]}" 2>>/tmp/kafka-up-compose.err >>/tmp/kafka-up-compose.out; then
   ui_err "compose up (sidecars) failed"
-  ui_hint "see /tmp/kafka-up-compose.log"
+  printf '\n--- compose stderr ---\n' >&2
+  cat /tmp/kafka-up-compose.err >&2
+  printf '\n--- compose stdout ---\n' >&2
+  cat /tmp/kafka-up-compose.out >&2
   exit 1
 fi
 for svc in "${sidecars[@]}"; do
