@@ -111,6 +111,7 @@ configure_topology() {
       export KAFKA_UP_BOOTSTRAP_INTERNAL="PLAINTEXT://kafka0:29092"
       export KAFKA_UP_BOOTSTRAP_INTERNAL_PLAIN="kafka0:29092"
       export KAFKA_UP_BOOTSTRAP_HOST="localhost:9092"
+      # shellcheck disable=SC2034
       KAFKA_UP_PROFILES=()
       ;;
     3)
@@ -120,6 +121,8 @@ configure_topology() {
       export KAFKA_UP_BOOTSTRAP_INTERNAL="PLAINTEXT://kafka0:29092,PLAINTEXT://kafka1:29092,PLAINTEXT://kafka2:29092"
       export KAFKA_UP_BOOTSTRAP_INTERNAL_PLAIN="kafka0:29092,kafka1:29092,kafka2:29092"
       export KAFKA_UP_BOOTSTRAP_HOST="localhost:9092,localhost:9192,localhost:9292"
+      # KAFKA_UP_PROFILES is consumed by kafka-up via array expansion.
+      # shellcheck disable=SC2034
       KAFKA_UP_PROFILES=(--profile cluster)
       ;;
     *)

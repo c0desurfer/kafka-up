@@ -59,30 +59,47 @@ ui_ok "$KAFKA_UP_ENGINE is reachable"
 configure_topology "$BROKERS"
 ui_ok "topology configured (RF=${KAFKA_UP_RF}, min.isr=${KAFKA_UP_MIN_ISR})"
 
-# Compose-up service list. We start brokers + SR always, and the
-# optional services on demand.
-services=(kafka0)
-if [ "$BROKERS" = "3" ]; then services+=(kafka1 kafka2); fi
-services+=(schema-registry)
-if [ "$WITH_CONNECT" = "1" ]; then services+=(connect); fi
-if [ "$WITH_UI" = "1" ];      then services+=(ui); fi
+# Bring up in two phases. Brokers first, then everything that depends
+# on them. In cluster mode this matters: Schema Registry creates the
+# `_schemas` topic with RF=3, which only succeeds once all three
+# brokers are reachable.
+brokers=(kafka0)
+if [ "$BROKERS" = "3" ]; then brokers+=(kafka1 kafka2); fi
 
-ui_section "starting containers"
+sidecars=(schema-registry)
+if [ "$WITH_CONNECT" = "1" ]; then sidecars+=(connect); fi
+if [ "$WITH_UI" = "1" ];      then sidecars+=(ui); fi
+
+ui_section "starting brokers"
 ui_step "pulling images and creating containers"
-if ! compose "${KAFKA_UP_PROFILES[@]}" up -d --remove-orphans "${services[@]}" >/tmp/kafka-up-compose.log 2>&1; then
-  ui_err "compose up failed"
+if ! compose "${KAFKA_UP_PROFILES[@]}" up -d --remove-orphans "${brokers[@]}" >/tmp/kafka-up-compose.log 2>&1; then
+  ui_err "compose up (brokers) failed"
   ui_hint "see /tmp/kafka-up-compose.log"
   exit 1
 fi
-ui_ok "containers up"
-
-ui_section "waiting for health"
-for svc in "${services[@]}"; do
-  ui_step "$svc"
-  if wait_healthy "$svc" 90; then
+for svc in "${brokers[@]}"; do
+  ui_step "waiting for $svc"
+  if wait_healthy "$svc" 120; then
     ui_ok "$svc healthy"
   else
-    ui_err "$svc did not become healthy in 90s"
+    ui_err "$svc did not become healthy in 120s"
+    ui_hint "try: ./kafka-logs $svc"
+    exit 1
+  fi
+done
+
+ui_section "starting sidecars"
+if ! compose "${KAFKA_UP_PROFILES[@]}" up -d "${sidecars[@]}" >>/tmp/kafka-up-compose.log 2>&1; then
+  ui_err "compose up (sidecars) failed"
+  ui_hint "see /tmp/kafka-up-compose.log"
+  exit 1
+fi
+for svc in "${sidecars[@]}"; do
+  ui_step "waiting for $svc"
+  if wait_healthy "$svc" 120; then
+    ui_ok "$svc healthy"
+  else
+    ui_err "$svc did not become healthy in 120s"
     ui_hint "try: ./kafka-logs $svc"
     exit 1
   fi

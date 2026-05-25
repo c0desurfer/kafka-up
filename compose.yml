@@ -37,7 +37,11 @@ x-broker-env: &broker-env
   KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
   KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
   KAFKA_HEAP_OPTS: "-Xmx768m -Xms512m"
-  CLUSTER_ID: "${CLUSTER_ID:-kafka-up-fcSL6g3nShTeMCtK}"
+  # Stable, valid cluster ID so storage is not reformatted on every
+  # restart. Apache Kafka requires a 22-character base64url string
+  # (16 raw bytes); generate a new one with `kafka-storage random-uuid`
+  # or `openssl rand -base64 16 | tr '/+' '_-' | tr -d =`.
+  CLUSTER_ID: "${CLUSTER_ID:-u1O6img7tQe42is0IeI85g}"
 
 services:
   kafka0:

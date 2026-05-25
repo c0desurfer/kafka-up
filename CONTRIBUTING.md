@@ -51,7 +51,7 @@ patch.
 
 Conventional commits, lowercase scope. Examples:
 
-```
+```text
 feat(compose): add ksqldb profile
 fix(kafka-up): wait for connect health before declaring success
 docs(readme): clarify cluster bootstrap string

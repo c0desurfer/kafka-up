@@ -26,7 +26,7 @@ A local Apache Kafka environment for developers, ready in around ten seconds.
 
 ---
 
-```
+```text
 $ ./kafka-up
 ██╗  ██╗ █████╗ ███████╗██╗  ██╗ █████╗       ██╗   ██╗██████╗
 ██║ ██╔╝██╔══██╗██╔════╝██║ ██╔╝██╔══██╗      ██║   ██║██╔══██╗
