@@ -55,19 +55,33 @@ jobs:
       - name: Produce and consume a test message
         run: |
           set -euo pipefail
-          docker exec kafka-up-kafka0 \
+          # In cluster mode, kafka1 and kafka2 advertise as localhost:9192
+          # and localhost:9292. Those resolve correctly from the host
+          # (Docker forwards the ports) but not from inside kafka0's
+          # container, where `localhost` is kafka0 itself. Running the
+          # producer/consumer with `--network host` makes localhost mean
+          # the runner's host network, which works in both single and
+          # cluster mode against the host-side bootstrap list.
+          if [ "${{ matrix.mode }}" = "cluster" ]; then
+            BOOTSTRAP="localhost:9092,localhost:9192,localhost:9292"
+          else
+            BOOTSTRAP="localhost:9092"
+          fi
+          KAFKA_IMG="apache/kafka:4.3.0"
+
+          docker run --rm --network host "$KAFKA_IMG" \
             /opt/kafka/bin/kafka-topics.sh \
-            --bootstrap-server localhost:9092 \
+            --bootstrap-server "$BOOTSTRAP" \
             --create --if-not-exists \
             --topic ci.smoke --partitions 3 --replication-factor 1
           msg='{"ci":"hello","ts":"'"$(date -Iseconds)"'"}'
-          echo "$msg" | docker exec -i kafka-up-kafka0 \
+          echo "$msg" | docker run --rm -i --network host "$KAFKA_IMG" \
             /opt/kafka/bin/kafka-console-producer.sh \
-            --bootstrap-server localhost:9092 --topic ci.smoke
-          got=$(docker exec kafka-up-kafka0 \
+            --bootstrap-server "$BOOTSTRAP" --topic ci.smoke
+          got=$(docker run --rm --network host "$KAFKA_IMG" \
             /opt/kafka/bin/kafka-console-consumer.sh \
-            --bootstrap-server localhost:9092 --topic ci.smoke \
-            --from-beginning --max-messages 1 --timeout-ms 15000)
+            --bootstrap-server "$BOOTSTRAP" --topic ci.smoke \
+            --from-beginning --max-messages 1 --timeout-ms 20000)
           echo "got: $got"
           test "$got" = "$msg"
 
