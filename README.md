@@ -122,6 +122,9 @@ cd kafka-up
 ./kafka-up --no-connect       # skip Kafka Connect
 ./kafka-up --no-ui            # skip the Kafbat UI
 ./kafka-up --no-seed          # do not create example topics
+./kafka-up --auth             # add SCRAM-256/512 + SASL_SSL listeners
+./kafka-up --full-seed        # 12-topic seed with sample messages
+./kafka-up --alt-registry     # add Apicurio Registry on 8082
 ./kafka-up --engine docker    # use docker compose instead of podman
 ```
 
@@ -134,6 +137,103 @@ cd kafka-up
 | `./kafka-logs`   | Tail logs for a service. Defaults to `kafka0`.              |
 
 All five scripts are pure Bash. Read them. They are the documentation.
+
+## Auth mode (`--auth`)
+
+By default, `./kafka-up` exposes one PLAINTEXT listener on `localhost:9092`,
+which is fine for almost all local development. When you want to exercise
+authenticated paths — testing a SASL/SCRAM connection from a client, a
+SASL_SSL bootstrap with cert pinning, or anything that talks to a
+production-shaped broker — pass `--auth`.
+
+`./kafka-up --auth` brings up four host-facing listeners:
+
+| Port | Protocol           | Mechanism      | Cert                     |
+|------|--------------------|----------------|--------------------------|
+| 9092 | PLAINTEXT          | none           | none                     |
+| 9093 | SASL_PLAINTEXT     | SCRAM-SHA-256  | none                     |
+| 9094 | SASL_PLAINTEXT     | SCRAM-SHA-512  | none                     |
+| 9095 | SASL_SSL           | SCRAM-SHA-512  | self-signed (`certs/ca.pem`) |
+
+Each external listener has a matching `INT_*` twin on `29093..29095`
+advertised under `kafka0:` so in-network sidecars can follow metadata
+back to the broker.
+
+Four SCRAM users are provisioned automatically:
+
+| User         | Mechanisms                  | Default password (override via `.env`)    |
+|--------------|-----------------------------|-------------------------------------------|
+| `kafkaup`    | SCRAM-SHA-256 + SCRAM-SHA-512 | `kafkaup-dev-256` / `kafkaup-dev-512`   |
+| `admin`      | SCRAM-SHA-512               | `admin-secret`                            |
+| `readonly`   | SCRAM-SHA-512               | `readonly-secret`                         |
+
+Copy `.env.example` to `.env` to override these. The defaults are fine
+for one-machine development. `certs/server.crt` is self-signed by
+`certs/ca.pem` with a 10-year validity; `./kafka-up --auth` only
+regenerates them if they're missing or within 7 days of expiry.
+
+A minimal SCRAM-256 client config looks like:
+
+```properties
+bootstrap.servers=localhost:9093
+security.protocol=SASL_PLAINTEXT
+sasl.mechanism=SCRAM-SHA-256
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required \
+  username="kafkaup" password="kafkaup-dev-256";
+```
+
+For SASL_SSL on 9095, add the truststore and disable hostname checks
+against the self-signed cert:
+
+```properties
+bootstrap.servers=localhost:9095
+security.protocol=SASL_SSL
+sasl.mechanism=SCRAM-SHA-512
+sasl.jaas.config=org.apache.kafka.common.security.scram.ScramLoginModule required \
+  username="kafkaup" password="kafkaup-dev-512";
+ssl.truststore.location=/path/to/certs/ca.pem
+ssl.truststore.type=PEM
+ssl.endpoint.identification.algorithm=
+```
+
+`--auth` is currently single-broker only. Combining it with `--brokers 3`
+is rejected because the cluster topology would need per-broker SCRAM/SSL
+port mapping (9193, 9293 variants); that work is out of scope until
+there's a real reason to test multi-broker SASL locally.
+
+## Full seed (`--full-seed`)
+
+The default seed is five lean topics. `--full-seed` swaps that for a
+twelve-topic set with retention/compaction variety, two keyed topics
+(`cdc.postgres.public.orders` and `users.profile.changelog`), and an
+internal probe topic (`__kafkaup_test_internal`). It also produces
+~1000 sample JSON messages spread across the set, so the UI has
+something to scroll through.
+
+Full-seed topics:
+
+| Topic                          | Partitions | Retention | Cleanup policy |
+|--------------------------------|-----------:|-----------|----------------|
+| `orders.v1.created`            |         12 | 7d        | delete         |
+| `orders.v1.updated`            |         12 | 7d        | delete         |
+| `orders.v1.cancelled`          |          6 | 7d        | delete         |
+| `payments.transactions`        |          6 | 14d       | delete         |
+| `users.sessions`               |          4 | 3d        | delete         |
+| `analytics.pageview`           |          8 | 2d        | delete         |
+| `notifications.outbox`         |          2 | 1d        | delete         |
+| `notifications.dlq`            |          2 | 30d       | delete         |
+| `cdc.postgres.public.orders`   |          8 | 7d        | compact        |
+| `inventory.stock-delta`        |          4 | 7d        | delete         |
+| `users.profile.changelog`      |          4 | infinite  | compact        |
+| `__kafkaup_test_internal`      |          1 | 7d        | delete         |
+
+## Alternate registry (`--alt-registry`)
+
+`--alt-registry` brings up Apicurio Registry on `http://localhost:8082`
+in parallel to Confluent Schema Registry on 8081. The registries share
+the same broker but maintain their own subject namespaces, so this is
+the easiest way to test cross-registry compatibility for Avro / JSON
+Schema / Protobuf.
 
 ## Connecting to the cluster
 

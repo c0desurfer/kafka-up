@@ -15,3 +15,11 @@ Thumbs.db
 /tmp/
 /.env
 /.env.local
+
+# Auth mode: self-signed CA + broker cert, regenerated on demand by
+# scripts/generate-certs.sh. Never check these in.
+/certs/*
+!/certs/.gitkeep
+
+# Added by ggshield
+.cache_ggshield

@@ -15,9 +15,18 @@ ui_section "stopping kafka-up"
 
 require_engine || exit 1
 
+# If the cluster was started with --auth, the auth overlay is needed
+# so compose understands the kafka0 service definition. Detecting the
+# overlay from the running container set is awkward; always include
+# the overlay file if it exists. The merge is harmless when no auth
+# containers are running.
+if [ -f "$HERE/compose.auth.override.yml" ]; then
+  export KAFKA_UP_AUTH_OVERLAY="$HERE/compose.auth.override.yml"
+fi
+
 # Pass all known profiles so containers started under any of them get
 # stopped cleanly.
-if compose --profile cluster --profile connect --profile ui stop >/dev/null 2>&1; then
+if compose --profile cluster --profile connect --profile ui --profile alt-registry stop >/dev/null 2>&1; then
   ui_ok "containers stopped"
 else
   ui_warn "compose stop returned non-zero (nothing running?)"

@@ -32,9 +32,15 @@ if [ "$ASSUME_YES" = "0" ]; then
   fi
 fi
 
+# Include the auth overlay if present so the kafka0 service definition
+# is fully understood when --auth was used at bring-up time.
+if [ -f "$HERE/compose.auth.override.yml" ]; then
+  export KAFKA_UP_AUTH_OVERLAY="$HERE/compose.auth.override.yml"
+fi
+
 ui_section "tearing down"
 ui_step "removing containers and volumes"
-if compose --profile cluster --profile connect --profile ui down -v >/dev/null 2>&1; then
+if compose --profile cluster --profile connect --profile ui --profile alt-registry down -v >/dev/null 2>&1; then
   ui_ok "down -v complete"
 else
   ui_warn "compose down -v returned non-zero (nothing to remove?)"
@@ -48,6 +54,14 @@ for vol in kafka-up-kafka0-data kafka-up-kafka1-data kafka-up-kafka2-data; do
     ui_ok "removed volume $vol"
   fi
 done
+
+# Remove auth-mode artifacts (self-signed certs) so the next --auth
+# bring-up regenerates them. The .gitignored certs/ directory stays
+# in place; only the contents are scrubbed.
+if [ -d "$HERE/certs" ] && ls "$HERE"/certs/* >/dev/null 2>&1; then
+  rm -f "$HERE"/certs/ca.* "$HERE"/certs/server.* >/dev/null 2>&1 || true
+  ui_ok "wiped certs/"
+fi
 
 ui_section "summary"
 ui_kv "next" "./kafka-up to start a fresh cluster"

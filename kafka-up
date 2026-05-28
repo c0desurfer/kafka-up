@@ -3,10 +3,16 @@
 #
 # Usage:
 #   ./kafka-up                   one broker, Schema Registry, Connect, UI
-#   ./kafka-up --brokers 3       three-broker cluster
+#   ./kafka-up --brokers 3       three-broker cluster (PLAINTEXT only)
 #   ./kafka-up --no-connect      skip Kafka Connect
 #   ./kafka-up --no-ui           skip the Kafbat web UI
 #   ./kafka-up --no-seed         do not create the example topics
+#   ./kafka-up --auth            enable SCRAM-256/512 + SASL_SSL listeners
+#                                on ports 9093/9094/9095 with auto-generated
+#                                self-signed certs and 4 SCRAM users
+#   ./kafka-up --full-seed       use the 12-topic seed set with sample
+#                                messages (default is 5 topics, no messages)
+#   ./kafka-up --alt-registry    also start Apicurio Schema Registry on 8082
 #   ./kafka-up --engine docker   use docker compose instead of podman
 #
 # Anything not in the option list is rejected. Output is designed to be
@@ -25,20 +31,41 @@ BROKERS=1
 WITH_CONNECT=1
 WITH_UI=1
 WITH_SEED=1
+WITH_AUTH=0
+WITH_FULL_SEED=0
+WITH_ALT_REGISTRY=0
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --brokers)    BROKERS="${2:-}"; shift 2 ;;
-    --brokers=*)  BROKERS="${1#*=}"; shift ;;
-    --no-connect) WITH_CONNECT=0; shift ;;
-    --no-ui)      WITH_UI=0; shift ;;
-    --no-seed)    WITH_SEED=0; shift ;;
-    --engine)     KAFKA_UP_ENGINE="${2:-}"; export KAFKA_UP_ENGINE; shift 2 ;;
-    --engine=*)   KAFKA_UP_ENGINE="${1#*=}"; export KAFKA_UP_ENGINE; shift ;;
-    -h|--help)    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *)            ui_err "unknown argument: $1"; exit 64 ;;
+    --brokers)       BROKERS="${2:-}"; shift 2 ;;
+    --brokers=*)     BROKERS="${1#*=}"; shift ;;
+    --no-connect)    WITH_CONNECT=0; shift ;;
+    --no-ui)         WITH_UI=0; shift ;;
+    --no-seed)       WITH_SEED=0; shift ;;
+    --auth)          WITH_AUTH=1; shift ;;
+    --full-seed)     WITH_FULL_SEED=1; shift ;;
+    --alt-registry)  WITH_ALT_REGISTRY=1; shift ;;
+    --engine)        KAFKA_UP_ENGINE="${2:-}"; export KAFKA_UP_ENGINE; shift 2 ;;
+    --engine=*)      KAFKA_UP_ENGINE="${1#*=}"; export KAFKA_UP_ENGINE; shift ;;
+    -h|--help)       sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *)               ui_err "unknown argument: $1"; exit 64 ;;
   esac
 done
+
+# Auth mode is single-broker only for now. A three-broker auth setup
+# needs per-broker port mapping (9193/9293 variants) and additional
+# listener-name plumbing — not blocking the v1 feature.
+if [ "$WITH_AUTH" = "1" ] && [ "$BROKERS" != "1" ]; then
+  ui_err "--auth currently supports single-broker mode only (--brokers 1)"
+  exit 64
+fi
+
+# Seed scripts and provisioning helpers read this env var.
+if [ "$WITH_FULL_SEED" = "1" ]; then
+  export KAFKA_UP_SEED_SET=full
+else
+  export KAFKA_UP_SEED_SET=default
+fi
 
 START_TS=$(date +%s)
 ui_banner
@@ -47,10 +74,12 @@ printf '%sone command, one cluster, zero ceremony%s\n' "${C_DIM}" "${C_RESET}"
 ui_section "plan"
 ui_kv "engine"          "$KAFKA_UP_ENGINE"
 ui_kv "brokers"         "$BROKERS"
+ui_kv "auth"            "$( ((WITH_AUTH))         && echo 'on  (SCRAM-256/512 + SASL_SSL on 9093/9094/9095)' || echo 'off' )"
 ui_kv "schema registry" "on  (port 8081)"
-ui_kv "kafka connect"   "$( ((WITH_CONNECT)) && echo 'on  (port 8083)' || echo 'off' )"
-ui_kv "web ui"          "$( ((WITH_UI))      && echo 'on  (port 8080)' || echo 'off' )"
-ui_kv "seed topics"     "$( ((WITH_SEED))    && echo 'yes' || echo 'no' )"
+ui_kv "alt registry"    "$( ((WITH_ALT_REGISTRY)) && echo 'on  (Apicurio, port 8082)' || echo 'off' )"
+ui_kv "kafka connect"   "$( ((WITH_CONNECT))      && echo 'on  (port 8083)' || echo 'off' )"
+ui_kv "web ui"          "$( ((WITH_UI))           && echo 'on  (port 8080)' || echo 'off' )"
+ui_kv "seed topics"     "$( ((WITH_SEED))         && ( ((WITH_FULL_SEED)) && echo 'yes (full set: 12 topics + messages)' || echo 'yes (default set: 5 topics)' ) || echo 'no' )"
 
 ui_section "preflight"
 require_engine || exit 1
@@ -58,6 +87,23 @@ ui_ok "$KAFKA_UP_ENGINE is reachable"
 
 configure_topology "$BROKERS"
 ui_ok "topology configured (RF=${KAFKA_UP_RF}, min.isr=${KAFKA_UP_MIN_ISR})"
+
+if [ "$WITH_AUTH" = "1" ]; then
+  export KAFKA_UP_AUTH_OVERLAY="$HERE/compose.auth.override.yml"
+  ui_step "generating broker certs (if needed)"
+  if "$HERE/scripts/generate-certs.sh" --quiet; then
+    ui_ok "broker certs ready"
+  else
+    ui_err "cert generation failed"
+    exit 1
+  fi
+fi
+
+if [ "$WITH_ALT_REGISTRY" = "1" ]; then
+  # configure_topology may have left KAFKA_UP_PROFILES empty; append
+  # the alt-registry profile so apicurio is included.
+  KAFKA_UP_PROFILES+=(--profile alt-registry)
+fi
 
 # Bring up in two phases. Brokers first, then everything that depends
 # on them. In cluster mode this matters: Schema Registry creates the
@@ -67,8 +113,9 @@ brokers=(kafka0)
 if [ "$BROKERS" = "3" ]; then brokers+=(kafka1 kafka2); fi
 
 sidecars=(schema-registry)
-if [ "$WITH_CONNECT" = "1" ]; then sidecars+=(connect); fi
-if [ "$WITH_UI" = "1" ];      then sidecars+=(ui); fi
+if [ "$WITH_CONNECT" = "1" ];      then sidecars+=(connect); fi
+if [ "$WITH_UI" = "1" ];           then sidecars+=(ui); fi
+if [ "$WITH_ALT_REGISTRY" = "1" ]; then sidecars+=(apicurio); fi
 
 ui_section "starting brokers"
 ui_step "pulling images and creating containers"
@@ -111,30 +158,72 @@ for svc in "${sidecars[@]}"; do
   fi
 done
 
+if [ "$WITH_AUTH" = "1" ]; then
+  ui_section "provisioning auth"
+  ui_step "creating SCRAM users on the running broker"
+  if "$HERE/scripts/provision-users.sh" >/tmp/kafka-up-users.log 2>&1; then
+    ui_ok "SCRAM users ready"
+  else
+    ui_err "provision-users.sh failed"
+    ui_hint "see /tmp/kafka-up-users.log"
+    exit 1
+  fi
+fi
+
 if [ "$WITH_SEED" = "1" ]; then
   ui_section "seeding"
-  ui_step "creating example topics"
+  ui_step "creating example topics ($( ((WITH_FULL_SEED)) && echo 'full set' || echo 'default set' ))"
   if "$HERE/scripts/seed-topics.sh" >/tmp/kafka-up-seed.log 2>&1; then
     ui_ok "topics ready"
   else
     ui_warn "seed-topics.sh failed (cluster is up regardless)"
     ui_hint "see /tmp/kafka-up-seed.log"
   fi
+  if [ "$WITH_FULL_SEED" = "1" ]; then
+    ui_step "producing sample messages"
+    if "$HERE/scripts/seed-messages.sh" >>/tmp/kafka-up-seed.log 2>&1; then
+      ui_ok "messages produced"
+    else
+      ui_warn "seed-messages.sh failed (topics are ready regardless)"
+      ui_hint "see /tmp/kafka-up-seed.log"
+    fi
+  fi
 fi
 
 ui_section "summary"
-ui_box "kafka-up is ready"                                                  \
-  "bootstrap (host)     ${KAFKA_UP_BOOTSTRAP_HOST}"                          \
-  "schema registry      http://localhost:8081"                              \
-  "$( ((WITH_CONNECT)) && echo 'kafka connect        http://localhost:8083' || echo 'kafka connect        disabled' )" \
-  "$( ((WITH_UI))      && echo 'web ui               http://localhost:8080' || echo 'web ui               disabled' )" \
-  ""                                                                        \
-  "brokers              ${BROKERS}"                                          \
-  "replication factor   ${KAFKA_UP_RF}"                                      \
-  "min insync replicas  ${KAFKA_UP_MIN_ISR}"                                \
-  ""                                                                        \
-  "stop the cluster     ./kafka-down"                                       \
-  "wipe everything      ./kafka-reset"                                      \
-  "see what's running   ./kafka-status"
+if [ "$WITH_AUTH" = "1" ]; then
+  ui_box "kafka-up is ready"                                                                  \
+    "bootstrap (PLAINTEXT) localhost:9092"                                                    \
+    "bootstrap (SCRAM-256) localhost:9093"                                                    \
+    "bootstrap (SCRAM-512) localhost:9094"                                                    \
+    "bootstrap (SASL_SSL)  localhost:9095   ca=certs/ca.pem"                                  \
+    "schema registry       http://localhost:8081"                                             \
+    "$( ((WITH_ALT_REGISTRY)) && echo 'alt registry          http://localhost:8082' || echo 'alt registry          disabled' )" \
+    "$( ((WITH_CONNECT))      && echo 'kafka connect         http://localhost:8083' || echo 'kafka connect         disabled' )" \
+    "$( ((WITH_UI))           && echo 'web ui                http://localhost:8080' || echo 'web ui                disabled' )" \
+    ""                                                                                        \
+    "brokers               ${BROKERS}"                                                        \
+    "replication factor    ${KAFKA_UP_RF}"                                                    \
+    "min insync replicas   ${KAFKA_UP_MIN_ISR}"                                              \
+    ""                                                                                        \
+    "stop the cluster      ./kafka-down"                                                      \
+    "wipe everything       ./kafka-reset"                                                     \
+    "see what's running    ./kafka-status"
+else
+  ui_box "kafka-up is ready"                                                                  \
+    "bootstrap (host)      ${KAFKA_UP_BOOTSTRAP_HOST}"                                        \
+    "schema registry       http://localhost:8081"                                             \
+    "$( ((WITH_ALT_REGISTRY)) && echo 'alt registry          http://localhost:8082' || echo 'alt registry          disabled' )" \
+    "$( ((WITH_CONNECT))      && echo 'kafka connect         http://localhost:8083' || echo 'kafka connect         disabled' )" \
+    "$( ((WITH_UI))           && echo 'web ui                http://localhost:8080' || echo 'web ui                disabled' )" \
+    ""                                                                                        \
+    "brokers               ${BROKERS}"                                                        \
+    "replication factor    ${KAFKA_UP_RF}"                                                    \
+    "min insync replicas   ${KAFKA_UP_MIN_ISR}"                                              \
+    ""                                                                                        \
+    "stop the cluster      ./kafka-down"                                                      \
+    "wipe everything       ./kafka-reset"                                                     \
+    "see what's running    ./kafka-status"
+fi
 
 printf '\n%sready in %s%s\n' "${C_DIM}" "$(ui_elapsed "$START_TS")" "${C_RESET}"

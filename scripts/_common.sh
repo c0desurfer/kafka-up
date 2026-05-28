@@ -15,8 +15,17 @@ export KAFKA_UP_ENGINE
 # Service names are container-engine-agnostic. We always go through
 # `$ENGINE compose -f compose.yml ...` so podman-compose and docker
 # compose v2 both work.
+#
+# If KAFKA_UP_AUTH_OVERLAY is set (kafka-up --auth exports it), the
+# auth override file is layered on top of the base compose file. The
+# overlay mounts the 4-listener server.properties + certs and exposes
+# the SCRAM/SSL ports.
 compose() {
-  "$KAFKA_UP_ENGINE" compose -f "$COMPOSE_FILE" "$@"
+  local files=(-f "$COMPOSE_FILE")
+  if [ -n "${KAFKA_UP_AUTH_OVERLAY:-}" ]; then
+    files+=(-f "$KAFKA_UP_AUTH_OVERLAY")
+  fi
+  "$KAFKA_UP_ENGINE" compose "${files[@]}" "$@"
 }
 
 # Run a command inside a service container.

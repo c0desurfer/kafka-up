@@ -1,0 +1,19 @@
+version: 2
+
+# kafka-up ships well-known development defaults for the SCRAM users
+# created by `--auth`. They are documented in the README, in
+# .env.example, and in scripts/provision-users.sh on purpose: every
+# user is expected to see them and override via .env if they want.
+# These strings are design surface, not secrets, so they're allowlisted
+# here to avoid false-positives on every commit.
+
+secret:
+  ignored_matches:
+    - name: "kafkaup SCRAM-SHA-256 default password"
+      match: "kafkaup-dev-256"
+    - name: "kafkaup SCRAM-SHA-512 default password"
+      match: "kafkaup-dev-512"
+    - name: "admin SCRAM-SHA-512 default password"
+      match: "admin-secret"
+    - name: "readonly SCRAM-SHA-512 default password"
+      match: "readonly-secret"
