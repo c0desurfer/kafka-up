@@ -41,9 +41,15 @@ services:
         . /etc/kafka/docker/bash-config
         . /etc/kafka/docker/configureDefaults
         . /etc/kafka/docker/launch
+    # The three KAFKA_LISTENER* values below are single Kafka properties
+    # whose comma-separated elements must stay on one line; YAML folded
+    # scalars would inject spaces and corrupt the values. Suppress the
+    # line-length warning for those specific lines only.
     environment:
+      # yamllint disable rule:line-length
       KAFKA_LISTENERS: "CONTROLLER://:9090,INTERNAL://:29092,PLAINTEXT://:9092,SASL_256://:9093,SASL_512://:9094,SASL_SSL://:9095,INT_SASL_256://:29093,INT_SASL_512://:29094,INT_SASL_SSL://:29095"
       KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka0:29092,PLAINTEXT://localhost:9092,SASL_256://localhost:9093,SASL_512://localhost:9094,SASL_SSL://localhost:9095,INT_SASL_256://kafka0:29093,INT_SASL_512://kafka0:29094,INT_SASL_SSL://kafka0:29095"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT,SASL_256:SASL_PLAINTEXT,SASL_512:SASL_PLAINTEXT,SASL_SSL:SASL_SSL,INT_SASL_256:SASL_PLAINTEXT,INT_SASL_512:SASL_PLAINTEXT,INT_SASL_SSL:SASL_SSL"
+      # yamllint enable rule:line-length
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
