@@ -15,7 +15,12 @@ ui_banner
 require_engine || exit 1
 
 ui_section "containers"
-mapfile -t rows < <(
+# macOS ships bash 3.2 which lacks `mapfile`. Use a `read -r` loop
+# so the script runs on every macOS without GNU coreutils.
+rows=()
+while IFS= read -r line; do
+  rows+=("$line")
+done < <(
   "$KAFKA_UP_ENGINE" ps \
     --filter "name=kafka-up-" \
     --format '{{.Names}}|{{.Status}}|{{.Ports}}' \
@@ -76,6 +81,18 @@ if is_running connect; then
     ui_kv "connectors" "${count:-0}"
   else
     ui_warn "connect not responding on :8083"
+  fi
+fi
+
+if is_running apicurio; then
+  ui_section "alt registry (apicurio)"
+  if info=$(curl -fsS http://localhost:8082/apis/registry/v3/system/info 2>/dev/null); then
+    name=$(printf '%s' "$info" | grep -oE '"name":"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"/\1/')
+    version=$(printf '%s' "$info" | grep -oE '"version":"[^"]*"' | head -1 | sed 's/.*"\([^"]*\)"/\1/')
+    ui_kv "open" "http://localhost:8082"
+    ui_kv "info" "${name:-apicurio} ${version:-}"
+  else
+    ui_warn "apicurio not responding on :8082"
   fi
 fi
 
