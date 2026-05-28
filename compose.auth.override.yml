@@ -1,0 +1,49 @@
+# kafka-up --auth overlay.
+#
+# Applied via `podman compose -f compose.yml -f compose.auth.override.yml`
+# when the user passes --auth. Adds:
+#   - the 4-listener server.properties (mounted to override the base
+#     env-driven config from compose.yml)
+#   - the certs directory for the SASL_SSL listener
+#   - the three extra host ports (9093, 9094, 9095)
+#
+# Why the entrypoint override: the apache/kafka image's
+# /etc/kafka/docker/configure script inspects KAFKA_ADVERTISED_LISTENERS
+# and, on seeing SSL://, demands env vars (KAFKA_SSL_KEYSTORE_FILENAME
+# etc.) that don't apply to our file-driven, PEM-format setup. We skip
+# the configure step but keep /etc/kafka/docker/launch, which runs
+# KafkaDockerWrapper to format storage and start the broker against
+# the mounted properties file.
+#
+# Auth mode currently supports the single-broker topology only. Adding
+# it on top of --brokers 3 requires per-broker port mapping (9193/9293
+# variants for SCRAM/SSL) and additional listener-name plumbing.
+
+services:
+  kafka0:
+    ports:
+      - "127.0.0.1:9093:9093"
+      - "127.0.0.1:9094:9094"
+      - "127.0.0.1:9095:9095"
+    volumes:
+      - ./config/server-auth.properties:/mnt/shared/config/server.properties:ro
+      - ./certs:/etc/kafka/secrets:ro
+    # Bypass the image's bash configure step (which fights with our
+    # SASL_SSL config) and go straight to launch. The launch script
+    # invokes KafkaDockerWrapper, which still merges KAFKA_* env vars
+    # over the mounted properties file. The env vars below match the
+    # file, so the merge yields the same 9-listener config either way.
+    entrypoint:
+      - bash
+      - -c
+      - |
+        set -euo pipefail
+        . /etc/kafka/docker/bash-config
+        . /etc/kafka/docker/configureDefaults
+        . /etc/kafka/docker/launch
+    environment:
+      KAFKA_LISTENERS: "CONTROLLER://:9090,INTERNAL://:29092,PLAINTEXT://:9092,SASL_256://:9093,SASL_512://:9094,SASL_SSL://:9095,INT_SASL_256://:29093,INT_SASL_512://:29094,INT_SASL_SSL://:29095"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka0:29092,PLAINTEXT://localhost:9092,SASL_256://localhost:9093,SASL_512://localhost:9094,SASL_SSL://localhost:9095,INT_SASL_256://kafka0:29093,INT_SASL_512://kafka0:29094,INT_SASL_SSL://kafka0:29095"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT,SASL_256:SASL_PLAINTEXT,SASL_512:SASL_PLAINTEXT,SASL_SSL:SASL_SSL,INT_SASL_256:SASL_PLAINTEXT,INT_SASL_512:SASL_PLAINTEXT,INT_SASL_SSL:SASL_SSL"
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
