@@ -4,8 +4,8 @@
 # when the user passes --auth. Adds:
 #   - the 4-listener server.properties (mounted to override the base
 #     env-driven config from compose.yml)
-#   - the certs directory for the SASL_SSL listener
-#   - the three extra host ports (9093, 9094, 9095)
+#   - the certs directory for the SASL_SSL and MTLS listeners
+#   - the four extra host ports (9093, 9094, 9095, 9096)
 #
 # Why the entrypoint override: the apache/kafka image's
 # /etc/kafka/docker/configure script inspects KAFKA_ADVERTISED_LISTENERS
@@ -25,6 +25,7 @@ services:
       - "127.0.0.1:9093:9093"
       - "127.0.0.1:9094:9094"
       - "127.0.0.1:9095:9095"
+      - "127.0.0.1:9096:9096"
     volumes:
       - ./config/server-auth.properties:/mnt/shared/config/server.properties:ro
       - ./certs:/etc/kafka/secrets:ro
@@ -47,9 +48,9 @@ services:
     # line-length warning for those specific lines only.
     environment:
       # yamllint disable rule:line-length
-      KAFKA_LISTENERS: "CONTROLLER://:9090,INTERNAL://:29092,PLAINTEXT://:9092,SASL_256://:9093,SASL_512://:9094,SASL_SSL://:9095,INT_SASL_256://:29093,INT_SASL_512://:29094,INT_SASL_SSL://:29095"
-      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka0:29092,PLAINTEXT://localhost:9092,SASL_256://localhost:9093,SASL_512://localhost:9094,SASL_SSL://localhost:9095,INT_SASL_256://kafka0:29093,INT_SASL_512://kafka0:29094,INT_SASL_SSL://kafka0:29095"
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT,SASL_256:SASL_PLAINTEXT,SASL_512:SASL_PLAINTEXT,SASL_SSL:SASL_SSL,INT_SASL_256:SASL_PLAINTEXT,INT_SASL_512:SASL_PLAINTEXT,INT_SASL_SSL:SASL_SSL"
+      KAFKA_LISTENERS: "CONTROLLER://:9090,INTERNAL://:29092,PLAINTEXT://:9092,SASL_256://:9093,SASL_512://:9094,SASL_SSL://:9095,MTLS://:9096,INT_SASL_256://:29093,INT_SASL_512://:29094,INT_SASL_SSL://:29095,INT_MTLS://:29096"
+      KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka0:29092,PLAINTEXT://localhost:9092,SASL_256://localhost:9093,SASL_512://localhost:9094,SASL_SSL://localhost:9095,MTLS://localhost:9096,INT_SASL_256://kafka0:29093,INT_SASL_512://kafka0:29094,INT_SASL_SSL://kafka0:29095,INT_MTLS://kafka0:29096"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,PLAINTEXT:PLAINTEXT,SASL_256:SASL_PLAINTEXT,SASL_512:SASL_PLAINTEXT,SASL_SSL:SASL_SSL,MTLS:SSL,INT_SASL_256:SASL_PLAINTEXT,INT_SASL_512:SASL_PLAINTEXT,INT_SASL_SSL:SASL_SSL,INT_MTLS:SSL"
       # yamllint enable rule:line-length
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
