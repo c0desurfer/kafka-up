@@ -46,7 +46,8 @@ log "→ generating new CA + broker cert (valid ${DAYS_VALID} days)"
 cd "$CERT_DIR"
 
 # Clean up any previous artifacts so we don't mix old + new files.
-rm -f ca.key ca.pem ca.srl server.key server.crt server.csr server.pem server.p12 server.ext
+rm -f ca.key ca.pem ca.srl server.key server.crt server.csr server.pem server.p12 server.ext \
+  client.key client.crt client.csr client.pem client.p12 client.ext
 
 # ---- CA ----
 openssl req -x509 -newkey rsa:4096 -sha256 -days "$DAYS_VALID" -nodes \
@@ -90,12 +91,43 @@ openssl pkcs12 -export \
   -out server.p12 \
   -passout pass:changeit 2>/dev/null
 
-rm -f server.csr server.ext
+# ---- Client key + CSR + signed cert (for the mTLS listener on 9096) ----
+# The MTLS listener sets ssl.client.auth=required, so a client needs its own
+# CA-signed certificate, not just the CA to verify the broker with. Signed by
+# the same CA, which is also the broker's truststore.
+openssl req -new -newkey rsa:4096 -sha256 -nodes \
+  -keyout client.key \
+  -out client.csr \
+  -subj "/CN=neostream-client/O=kafka-up/OU=dev-cluster" 2>/dev/null
+
+cat > client.ext <<'EXT'
+authorityKeyIdentifier=keyid,issuer
+basicConstraints=CA:FALSE
+keyUsage = digitalSignature, keyEncipherment
+extendedKeyUsage = clientAuth
+EXT
+
+openssl x509 -req -sha256 -days "$DAYS_VALID" \
+  -in client.csr \
+  -CA ca.pem -CAkey ca.key -CAcreateserial \
+  -extfile client.ext \
+  -out client.crt 2>/dev/null
+
+cat client.crt client.key > client.pem
+
+openssl pkcs12 -export \
+  -in client.crt \
+  -inkey client.key \
+  -name kafka-client \
+  -out client.p12 \
+  -passout pass:changeit 2>/dev/null
+
+rm -f server.csr server.ext client.csr client.ext
 
 # Keep permissions tight on the key files. The compose mount is
 # read-only into the broker container, but we still don't want
 # anyone else on the host reading them.
-chmod 600 ca.key server.key server.pem server.p12
+chmod 600 ca.key server.key server.pem server.p12 client.key client.pem client.p12
 
 CA_FP=$(openssl x509 -in ca.pem -noout -fingerprint -sha256 | sed 's/^.*=//')
 log "→ done. CA fingerprint (sha256): $CA_FP"

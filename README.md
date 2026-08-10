@@ -122,7 +122,7 @@ cd kafka-up
 ./kafka-up --no-connect       # skip Kafka Connect
 ./kafka-up --no-ui            # skip the Kafbat UI
 ./kafka-up --no-seed          # do not create example topics
-./kafka-up --auth             # add SCRAM-256/512 + SASL_SSL listeners
+./kafka-up --auth             # add SCRAM-256/512 + SASL_SSL + mTLS listeners
 ./kafka-up --full-seed        # 12-topic seed with sample messages
 ./kafka-up --alt-registry     # add Apicurio Registry on 8082
 ./kafka-up --engine docker    # use docker compose instead of podman
@@ -146,7 +146,7 @@ authenticated paths — testing a SASL/SCRAM connection from a client, a
 SASL_SSL bootstrap with cert pinning, or anything that talks to a
 production-shaped broker — pass `--auth`.
 
-`./kafka-up --auth` brings up four host-facing listeners:
+`./kafka-up --auth` brings up five host-facing listeners:
 
 | Port | Protocol           | Mechanism      | Cert                     |
 |------|--------------------|----------------|--------------------------|
@@ -154,10 +154,19 @@ production-shaped broker — pass `--auth`.
 | 9093 | SASL_PLAINTEXT     | SCRAM-SHA-256  | none                     |
 | 9094 | SASL_PLAINTEXT     | SCRAM-SHA-512  | none                     |
 | 9095 | SASL_SSL           | SCRAM-SHA-512  | self-signed (`certs/ca.pem`) |
+| 9096 | SSL (mTLS)         | client cert    | self-signed, client cert **required** |
 
-Each external listener has a matching `INT_*` twin on `29093..29095`
+Each external listener has a matching `INT_*` twin on `29093..29096`
 advertised under `kafka0:` so in-network sidecars can follow metadata
 back to the broker.
+
+The difference between 9095 and 9096 is `ssl.client.auth`: 9095 encrypts
+the connection and authenticates the user with SCRAM, while 9096 sets
+`ssl.client.auth=required` and will not finish a handshake at all unless
+the client presents a certificate signed by the CA. That makes 9096 the
+listener to test real mutual TLS against. No authorizer is configured,
+so any client holding a CA-signed cert is fully authorized once the
+handshake succeeds.
 
 Four SCRAM users are provisioned automatically:
 
@@ -170,7 +179,11 @@ Four SCRAM users are provisioned automatically:
 Copy `.env.example` to `.env` to override these. The defaults are fine
 for one-machine development. `certs/server.crt` is self-signed by
 `certs/ca.pem` with a 10-year validity; `./kafka-up --auth` only
-regenerates them if they're missing or within 7 days of expiry.
+regenerates them if they're missing or within 7 days of expiry. The
+client certificate for the mTLS listener (`CN=neostream-client`,
+`extendedKeyUsage=clientAuth`) is signed by the same CA and written
+alongside it, also as a combined PEM and as a PKCS12 bundle with the
+passphrase `changeit`.
 
 A minimal SCRAM-256 client config looks like:
 
@@ -195,6 +208,25 @@ ssl.truststore.location=/path/to/certs/ca.pem
 ssl.truststore.type=PEM
 ssl.endpoint.identification.algorithm=
 ```
+
+For mTLS on 9096, present a client certificate as well as trusting the
+CA. There is no SASL layer on this listener, so there is no username:
+
+```properties
+bootstrap.servers=localhost:9096
+security.protocol=SSL
+ssl.truststore.location=/path/to/certs/ca.pem
+ssl.truststore.type=PEM
+ssl.keystore.location=/path/to/certs/client.pem
+ssl.keystore.type=PEM
+ssl.endpoint.identification.algorithm=
+```
+
+Omitting the keystore is the useful negative test: the broker drops the
+connection during the TLS handshake rather than returning a Kafka auth
+error, because client authentication happens below the Kafka protocol.
+A client that reports this as a generic "connection reset" is hiding the
+real cause from whoever has to debug it.
 
 `--auth` is currently single-broker only. Combining it with `--brokers 3`
 is rejected because the cluster topology would need per-broker SCRAM/SSL

@@ -197,6 +197,7 @@ if [ "$WITH_AUTH" = "1" ]; then
     "bootstrap (SCRAM-256) localhost:9093"                                                    \
     "bootstrap (SCRAM-512) localhost:9094"                                                    \
     "bootstrap (SASL_SSL)  localhost:9095   ca=certs/ca.pem"                                  \
+    "bootstrap (mTLS)      localhost:9096   ca + certs/client.{crt,key}"                      \
     "schema registry       http://localhost:8081"                                             \
     "$( ((WITH_ALT_REGISTRY)) && echo 'alt registry          http://localhost:8082' || echo 'alt registry          disabled' )" \
     "$( ((WITH_CONNECT))      && echo 'kafka connect         http://localhost:8083' || echo 'kafka connect         disabled' )" \
